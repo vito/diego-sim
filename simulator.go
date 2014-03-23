@@ -3,8 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/cloudfoundry-incubator/simulator/game_bbs"
+	Bbs "github.com/cloudfoundry-incubator/runtime-schema/bbs"
 	"github.com/cloudfoundry-incubator/simulator/logger"
+	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 	"github.com/cloudfoundry/storeadapter/storerunner/etcdstorerunner"
 	"github.com/cloudfoundry/storeadapter/workerpool"
@@ -39,7 +40,7 @@ func init() {
 
 var etcd *etcdstorerunner.ETCDClusterRunner
 var etcdAdapter *etcdstoreadapter.ETCDStoreAdapter
-var bbs *game_bbs.BBS
+var bbs *Bbs.BBS
 
 func main() {
 	flag.Parse()
@@ -83,7 +84,7 @@ func main() {
 	pool := workerpool.NewWorkerPool(50)
 	etcdAdapter = etcdstoreadapter.NewETCDStoreAdapter(etcd.NodeURLS(), pool)
 	etcdAdapter.Connect()
-	bbs = game_bbs.New(etcdAdapter)
+	bbs = Bbs.New(etcdAdapter, timeprovider.NewTimeProvider())
 
 	//monitor etcd
 	monitorETCD()

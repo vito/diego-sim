@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cloudfoundry-incubator/runtime-schema/models"
 	"github.com/cloudfoundry-incubator/simulator/logger"
-	"github.com/cloudfoundry-incubator/simulator/models"
 	"io/ioutil"
 	"path/filepath"
 	"strconv"
@@ -57,7 +57,7 @@ func desireAllRunOnces() {
 			defer allDesired.Done()
 			logger.Info("desiring.runonce", innerIndex)
 			registerDesired(innerIndex)
-			err := bbs.DesireRunOnce(runOnce)
+			err := bbs.DesireRunOnce(&runOnce)
 			if err != nil {
 				logger.Error("desire.runonce.failed", innerIndex, err)
 			}
@@ -101,7 +101,7 @@ func watchForCompletedRunOnces() {
 	}
 }
 
-func handleCompletedRunOnce(runOnce models.RunOnce) {
+func handleCompletedRunOnce(runOnce *models.RunOnce) {
 	simulationLock.Lock()
 	data, ok := runOnceTracker[runOnce.Guid]
 	if !ok {

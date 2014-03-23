@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	Bbs "github.com/cloudfoundry-incubator/runtime-schema/bbs"
 	"github.com/cloudfoundry-incubator/runtime-schema/models"
-	"github.com/cloudfoundry-incubator/simulator/game_bbs"
 	"github.com/cloudfoundry-incubator/simulator/logger"
 	"github.com/onsi/ginkgo/cleanup"
 	"io"
@@ -55,12 +55,12 @@ func monitorRunOnces(out io.Writer) {
 			<-ticker.C
 			t := time.Now()
 			logger.Info("fetch.etcd.runonce.data")
-			runOnceNodes, err := etcdAdapter.ListRecursively(game_bbs.RunOnceSchemaRoot)
+			runOnceNodes, err := etcdAdapter.ListRecursively(Bbs.RunOnceSchemaRoot)
 			if err != nil {
 				logger.Info("fetch.etcd.runOnceNodes.error", err)
 			}
 
-			executorNode, err := etcdAdapter.ListRecursively(game_bbs.ExecutorSchemaRoot)
+			executorNode, err := etcdAdapter.ListRecursively(Bbs.ExecutorSchemaRoot)
 			if err != nil {
 				logger.Info("fetch.etcd.executorNode.error", err)
 			}
@@ -72,31 +72,25 @@ func monitorRunOnces(out io.Writer) {
 				PresentExecutors:  len(executorNode.ChildNodes),
 				ReadTime:          float64(readTime) / 1e9,
 			}
-			pending, ok := runOnceNodes.Lookup("pending")
-			if ok {
-				d.Pending = len(pending.ChildNodes)
-			}
 
-			claimed, ok := runOnceNodes.Lookup("claimed")
-			if ok {
-				d.Claimed = len(claimed.ChildNodes)
-			}
-
-			running, ok := runOnceNodes.Lookup("running")
-			if ok {
-				d.Running = len(running.ChildNodes)
-				for _, node := range running.ChildNodes {
-					runOnce, err := models.NewRunOnceFromJSON(node.Value)
-					if err != nil {
-						logger.Error("etcd.decode.runonce", err)
-					}
-					d.RunningByExecutor[runOnce.ExecutorID] += 1
+			for _, node := range runOnceNodes.ChildNodes {
+				runOnce, err := models.NewRunOnceFromJSON(node.Value)
+				if err != nil {
+					logger.Error("etcd.decode.runonce", err)
+					continue
 				}
-			}
 
-			completed, ok := runOnceNodes.Lookup("completed")
-			if ok {
-				d.Completed = len(completed.ChildNodes)
+				switch runOnce.State {
+				case models.RunOnceStatePending:
+					d.Pending++
+				case models.RunOnceStateClaimed:
+					d.Claimed++
+				case models.RunOnceStateRunning:
+					d.Running++
+					d.RunningByExecutor[runOnce.ExecutorID]++
+				case models.RunOnceStateCompleted:
+					d.Completed++
+				}
 			}
 
 			logger.Info("fetched.etcd.runonce.data", time.Since(t), d.String())

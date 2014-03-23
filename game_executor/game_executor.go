@@ -3,9 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/cloudfoundry-incubator/simulator/game_bbs"
+	Bbs "github.com/cloudfoundry-incubator/runtime-schema/bbs"
+	"github.com/cloudfoundry-incubator/runtime-schema/models"
 	"github.com/cloudfoundry-incubator/simulator/logger"
-	"github.com/cloudfoundry-incubator/simulator/models"
+	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 	"github.com/cloudfoundry/storeadapter/workerpool"
 	"github.com/onsi/ginkgo/cleanup"
@@ -57,7 +58,7 @@ func main() {
 	tasks = &sync.WaitGroup{}
 	stop = make(chan bool)
 
-	bbs := game_bbs.New(etcdAdapter)
+	bbs := Bbs.New(etcdAdapter, timeprovider.NewTimeProvider())
 	err := etcdAdapter.Connect()
 	if err != nil {
 		logger.Fatal("etcd.connect.fatal", err)
@@ -70,7 +71,7 @@ func main() {
 	select {}
 }
 
-func maintainPresence(bbs game_bbs.ExecutorBBS) {
+func maintainPresence(bbs Bbs.ExecutorBBS) {
 	presence, maintainingPresenceErrors, err := bbs.MaintainExecutorPresence(*heartbeatInterval, *executorID)
 	if err != nil {
 		logger.Fatal("establish.presence.fatal", err)
@@ -88,7 +89,7 @@ func maintainPresence(bbs game_bbs.ExecutorBBS) {
 	}
 }
 
-func handleRunOnces(bbs game_bbs.ExecutorBBS) {
+func handleRunOnces(bbs Bbs.ExecutorBBS) {
 	tasks.Add(1)
 
 	for {
@@ -122,7 +123,7 @@ func handleRunOnces(bbs game_bbs.ExecutorBBS) {
 	}
 }
 
-func convergeRunOnces(bbs game_bbs.ExecutorBBS) {
+func convergeRunOnces(bbs Bbs.ExecutorBBS) {
 	tasks.Add(1)
 
 	for {
@@ -164,7 +165,7 @@ func convergeRunOnces(bbs game_bbs.ExecutorBBS) {
 	}
 }
 
-func handleRunOnce(bbs game_bbs.ExecutorBBS, runOnce models.RunOnce) {
+func handleRunOnce(bbs Bbs.ExecutorBBS, runOnce *models.RunOnce) {
 	//hesitate
 	logger.Info("handling.runonce", runOnce.Guid)
 	sleepForARandomInterval("sleep.claim", 0, 100)
@@ -178,11 +179,9 @@ func handleRunOnce(bbs game_bbs.ExecutorBBS, runOnce models.RunOnce) {
 	defer releaseMemory(runOnce.MemoryMB)
 
 	//mark claimed
-	runOnce.ExecutorID = *executorID
-
 	logger.Info("claiming.runonce", runOnce.Guid)
 
-	err := bbs.ClaimRunOnce(runOnce)
+	err := bbs.ClaimRunOnce(runOnce, *executorID)
 	if err != nil {
 		logger.Info("claim.runonce.failed", runOnce.Guid, err)
 		return
@@ -193,13 +192,12 @@ func handleRunOnce(bbs game_bbs.ExecutorBBS, runOnce models.RunOnce) {
 	//create container
 
 	sleepForContainerCreationInterval()
-	runOnce.ContainerHandle = "container"
 
 	//mark started
 
 	logger.Info("starting.runonce", runOnce.Guid)
 
-	err = bbs.StartRunOnce(runOnce)
+	err = bbs.StartRunOnce(runOnce, "container")
 	if err != nil {
 		logger.Error("start.runonce.failed", runOnce.Guid, err)
 		return
@@ -210,13 +208,12 @@ func handleRunOnce(bbs game_bbs.ExecutorBBS, runOnce models.RunOnce) {
 	//run
 
 	sleepForRunInterval()
-	runOnce.Failed = false
 
 	//mark completed
 
 	logger.Info("completing.runonce", runOnce.Guid)
 
-	err = bbs.CompleteRunOnce(runOnce)
+	err = bbs.CompleteRunOnce(runOnce, false, "", "")
 	if err != nil {
 		logger.Error("complete.runonce.failed", runOnce.Guid, err)
 		return
