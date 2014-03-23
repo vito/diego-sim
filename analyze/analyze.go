@@ -53,9 +53,9 @@ func main() {
 	out += "]"
 	out += "}"
 
-	ioutil.WriteFile("/Users/onsi/diego-workspace/src/github.com/cloudfoundry-incubator/simulator/viz/data/data.json", []byte(out), 0777)
+	ioutil.WriteFile("./viz/data/data.json", []byte(out), 0777)
 
-	exec.Command("open", "/Users/onsi/diego-workspace/src/github.com/cloudfoundry-incubator/simulator/viz/application.html").Run()
+	exec.Command("open", "./viz/application.html").Run()
 }
 
 func parseLogLines(file string) []string {
