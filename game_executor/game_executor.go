@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	Bbs "github.com/cloudfoundry-incubator/runtime-schema/bbs"
@@ -37,6 +38,8 @@ func init() {
 	RAND = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
+var MaintainPresenceError = errors.New("failed to maintain presence")
+
 func main() {
 	flag.Parse()
 	cleanup.Register(func() {
@@ -54,39 +57,69 @@ func main() {
 		strings.Split(*etcdCluster, ","),
 		workerpool.NewWorkerPool(10),
 	)
-
-	tasks = &sync.WaitGroup{}
-	stop = make(chan bool)
-
-	bbs := Bbs.New(etcdAdapter, timeprovider.NewTimeProvider())
 	err := etcdAdapter.Connect()
 	if err != nil {
 		logger.Fatal("etcd.connect.fatal", err)
 	}
 
-	go maintainPresence(bbs)
+	tasks = &sync.WaitGroup{}
+	stop = make(chan bool)
+
+	bbs := Bbs.New(etcdAdapter, timeprovider.NewTimeProvider())
+
+	ready := make(chan bool, 1)
+
+	err = maintainPresence(bbs, ready)
+	if err != nil {
+		logger.Fatal("executor.initializing-presence.failed", err)
+	}
+
 	go handleRunOnces(bbs)
 	go convergeRunOnces(bbs)
+
+	<-ready
+
 	logger.Info("executor.up")
+
 	select {}
 }
 
-func maintainPresence(bbs Bbs.ExecutorBBS) {
-	presence, maintainingPresenceErrors, err := bbs.MaintainExecutorPresence(*heartbeatInterval, *executorID)
+func maintainPresence(bbs Bbs.ExecutorBBS, ready chan<- bool) error {
+	p, statusChannel, err := bbs.MaintainExecutorPresence(*heartbeatInterval, *executorID)
 	if err != nil {
-		logger.Fatal("establish.presence.fatal", err)
+		ready <- false
+		return err
 	}
 
 	tasks.Add(1)
 
-	select {
-	case err := <-maintainingPresenceErrors:
-		tasks.Done()
-		logger.Fatal("maintain.presence.fatal", err)
-	case <-stop:
-		presence.Remove()
-		tasks.Done()
-	}
+	go func() {
+		for {
+			select {
+			case locked, ok := <-statusChannel:
+				if locked && ready != nil {
+					ready <- true
+					ready = nil
+				}
+
+				if !locked && ok {
+					tasks.Done()
+					logger.Fatal("maintain.presence.fatal", err)
+				}
+
+				if !ok {
+					tasks.Done()
+					return
+				}
+
+			case <-stop:
+				p.Remove()
+				tasks.Done()
+			}
+		}
+	}()
+
+	return nil
 }
 
 func handleRunOnces(bbs Bbs.ExecutorBBS) {
@@ -124,43 +157,31 @@ func handleRunOnces(bbs Bbs.ExecutorBBS) {
 }
 
 func convergeRunOnces(bbs Bbs.ExecutorBBS) {
+	statusChannel, releaseLock, err := bbs.MaintainConvergeLock(*convergenceInterval, *executorID)
+	if err != nil {
+		logger.Fatal("executor.converge-lock.acquire-failed", err)
+	}
+
 	tasks.Add(1)
 
 	for {
-		lostLock, releaseLock, err := bbs.MaintainConvergeLock(*convergenceInterval, *executorID)
-		if err != nil {
-			logger.Info("maintain.converge.lock.failed", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		logger.Info("converging")
-		t := time.Now()
-		bbs.ConvergeRunOnce(*timeToClaimRunOnce)
-		logger.Info("converged", time.Since(t))
-
-		ticker := time.NewTicker(*convergenceInterval)
-
-	dance:
-		for {
-			select {
-			case <-ticker.C:
-				logger.Info("converging")
-				t := time.Now()
-				bbs.ConvergeRunOnce(*timeToClaimRunOnce)
-				logger.Info("converged", time.Since(t))
-
-			case <-lostLock:
-				logger.Error("lost.convergence.lock")
-				ticker.Stop()
-				break dance
-
-			case <-stop:
-				ticker.Stop()
-				releaseLock <- make(chan bool)
+		select {
+		case locked, ok := <-statusChannel:
+			if !ok {
 				tasks.Done()
 				return
 			}
+
+			if locked {
+				t := time.Now()
+				logger.Info("converging")
+				bbs.ConvergeRunOnce(*timeToClaimRunOnce)
+				logger.Info("converged", time.Since(t))
+			} else {
+				logger.Error("lost.convergence.lock")
+			}
+		case <-stop:
+			releaseLock <- nil
 		}
 	}
 }
