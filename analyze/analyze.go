@@ -63,7 +63,7 @@ func parseLogLines(file string) []string {
 	simulatorLogB, _ := ioutil.ReadFile(file)
 	simulatorLog := string(simulatorLogB)
 	for _, logLine := range strings.Split(simulatorLog, "\n") {
-		if strings.Contains(logLine, "[ERR]") {
+		if strings.Contains(logLine, " [ERR] ") {
 			pieces := strings.SplitN(logLine, " [ERR] ", 2)
 			time, _ := strconv.ParseFloat(pieces[0], 64)
 			errorLines = append(errorLines, fmt.Sprintf(`{"time":%.4f, "line":"%s"}`, time, pieces[1]))
