@@ -105,8 +105,8 @@ func handleRunOnces(bbs Bbs.ExecutorBBS) {
 					break INNER
 				}
 
+				tasks.Add(1)
 				go func() {
-					tasks.Add(1)
 					handleRunOnce(bbs, runOnce)
 					tasks.Done()
 				}()
